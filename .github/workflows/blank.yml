@@ -1,0 +1,77 @@
+name: Android CI
+on:
+  schedule:
+    - cron: "4 23 * * 0"
+  push:
+    branches:
+      - main
+      
+env:
+  GH_TOKEN: "${{ github.token }}"
+  
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Delete workflow runs
+      uses: Mattraks/delete-workflow-runs@v2
+      with:
+        token: ${{ github.token }}
+        repository: ${{ github.repository }}
+        retain_days: 0
+        keep_minimum_runs: 0
+    - uses: actions/setup-go@v5
+      with:
+        go-version: 'stable'
+        cache: false 
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+       java-version: '21'
+       distribution: 'temurin'
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+      with:
+       cmdline-tools-version: 11076708
+    - uses: nttld/setup-ndk@v1
+      id: setup-ndk
+      with:
+        ndk-version: r27b
+        link-to-sdk: true      
+    - run: |
+       rm -fr * .git .github
+       gh repo clone SagerNet/sing-box -- --branch dev-next
+       cd sing-box 
+       #go install golang.org/x/mobile/cmd/gomobile@latest
+       #go install golang.org/x/mobile/cmd/gobind@latest
+       
+       go install -v github.com/sagernet/gomobile/cmd/gomobile@v0.1.4
+       go install -v github.com/sagernet/gomobile/cmd/gobind@v0.1.4
+       go get golang.org/x/mobile/cmd/gobind
+       go get golang.org/x/mobile/cmd/gomobile
+       gomobile init
+       CGO_ENABLED=0 gomobile bind -o ${{ github.workspace }}/libbox.aar \
+       -target android -androidapi 21 -javapkg io.nekohasekai -libname box \
+       -tags with_gvisor,with_quic,with_wireguard,with_ech,with_utls,with_clash_api \
+       -trimpath -ldflags "-s -w -buildid= -X 'github.com/sagernet/sing-box/constant.Version=ycycxz'" \
+       ./experimental/libbox 
+       
+       cd ..
+       rm -rf sing-box 
+       mkdir -p .github/workflows
+       wget -qO .github/workflows/blank.yml  https://github.com/${{github.repository}}/raw/main/.github/workflows/blank.yml
+       git config --global init.defaultBranch main
+       git init
+       git add .
+       git config user.name "mainians"
+       git config user.email "61817665+mainians@users.noreply.github.com"
+       git commit -m "$(date +"%Y-%m-%d")"
+       git remote add origin "https://${{ github.actor}}:${{secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
+       git push origin main --force
+    - uses: actions/upload-artifact@v4
+      with:
+       name: lib
+       path: |
+         libbox.aar
+         libbox-sources.jar
